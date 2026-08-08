@@ -148,8 +148,44 @@ describe("AgentSettingsScreen", () => {
     };
     expect(call.agent_settings_diff).toEqual({
       agent_kind: "openhands",
+      agent: "CodeActAgent",
       enable_sub_agents: true,
       tool_concurrency_limit: 1,
+    });
+  });
+
+  it("selects and persists a registered OpenHands agent implementation", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(SettingsService, "getSettings").mockResolvedValue(
+      buildSettings({
+        agent_settings: {
+          ...MOCK_DEFAULT_USER_SETTINGS.agent_settings,
+          agent_kind: "openhands",
+          agent: "CodeActAgent",
+        },
+      }),
+    );
+    const save = vi.spyOn(SettingsService, "saveSettings");
+
+    renderAgentSettingsScreen();
+    await screen.findByTestId("agent-settings-screen");
+    const agentSelector = await screen.findByDisplayValue(
+      "SCHEMA$AGENT$CHOICE$CODEACTAGENT",
+    );
+    await user.click(agentSelector);
+    await user.click(
+      await screen.findByRole("option", {
+        name: "SCHEMA$AGENT$CHOICE$MINIMALAGENT",
+      }),
+    );
+    await user.click(screen.getByTestId("agent-save-button"));
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[0]).toMatchObject({
+      agent_settings_diff: {
+        agent_kind: "openhands",
+        agent: "MinimalAgent",
+      },
     });
   });
 
@@ -497,6 +533,7 @@ describe("AgentSettingsScreen", () => {
     };
     expect(call.agent_settings_diff).toEqual({
       agent_kind: "openhands",
+      agent: "CodeActAgent",
       enable_sub_agents: false,
       tool_concurrency_limit: 1,
     });

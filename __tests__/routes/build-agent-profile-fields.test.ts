@@ -26,6 +26,23 @@ const concurrencyField: SettingsFieldSchema = {
   required: false,
 };
 
+const agentField: SettingsFieldSchema = {
+  key: "agent",
+  label: "Agent",
+  section: "general",
+  section_label: "General",
+  value_type: "string",
+  default: "CodeActAgent",
+  choices: [
+    { label: "OpenHands CodeAct Agent", value: "CodeActAgent" },
+    { label: "Minimal Agent", value: "MinimalAgent" },
+  ],
+  depends_on: [],
+  prominence: "major",
+  secret: false,
+  required: false,
+};
+
 describe("buildAgentProfileFields — ACP", () => {
   it("stores no explicit command for a built-in provider on its default command", () => {
     const fields = buildAgentProfileFields(baseAcp);
@@ -84,11 +101,14 @@ describe("buildAgentProfileFields — OpenHands", () => {
     subAgentsEnabled: true,
     toolConcurrencyField: undefined,
     toolConcurrency: "",
+    agentImplementationField: agentField,
+    agentImplementation: "MinimalAgent",
   };
 
   it("passes through enable_sub_agents and omits concurrency when the field is absent", () => {
     expect(buildAgentProfileFields(baseOh)).toEqual({
       agent_kind: "openhands",
+      agent: "MinimalAgent",
       enable_sub_agents: true,
     });
   });

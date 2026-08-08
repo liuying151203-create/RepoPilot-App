@@ -74,6 +74,26 @@ const MOCK_AGENT_SETTINGS_SCHEMA: NonNullable<
       label: "General",
       fields: [
         {
+          key: "agent",
+          label: "Agent",
+          description: "Select the registered Agent implementation.",
+          section: "general",
+          section_label: "General",
+          value_type: "string",
+          default: "CodeActAgent",
+          choices: [
+            {
+              label: "OpenHands CodeAct Agent",
+              value: "CodeActAgent",
+            },
+            { label: "Minimal Agent", value: "MinimalAgent" },
+          ],
+          depends_on: [],
+          prominence: "major",
+          secret: false,
+          required: false,
+        },
+        {
           key: "enable_sub_agents",
           label: "Enable sub-agents",
           description:
@@ -450,6 +470,7 @@ export const MOCK_DEFAULT_USER_SETTINGS: Settings = {
   agent_settings_schema: MOCK_AGENT_SETTINGS_SCHEMA,
   agent_settings: {
     ...DEFAULT_AGENT_SETTINGS,
+    agent: "CodeActAgent",
     verification: {
       critic_enabled: false,
       enable_iterative_refinement: false,

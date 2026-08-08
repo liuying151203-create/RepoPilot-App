@@ -45,6 +45,7 @@ export const handle = { hideTitle: true };
 type AgentType = "openhands" | "acp";
 
 const ENABLE_SUB_AGENTS_FIELD_KEY = "enable_sub_agents";
+const AGENT_IMPLEMENTATION_FIELD_KEY = "agent";
 const TOOL_CONCURRENCY_FIELD_KEY = "tool_concurrency_limit";
 const COMMAND_PLACEHOLDER_FALLBACK = "npx -y <package-name>";
 const ACP_CUSTOM_MODEL_KEY = "__custom_model__";
@@ -98,6 +99,7 @@ function isKnownAcpModel(
 export type AgentProfileFieldsDraft =
   | {
       agent_kind: "openhands";
+      agent?: string;
       enable_sub_agents: boolean;
       tool_concurrency_limit?: number;
     }
@@ -119,6 +121,8 @@ export interface AgentProfileFieldsInput {
   commandTokens: string[];
   acpModel: string;
   subAgentsEnabled: boolean;
+  agentImplementationField?: SettingsFieldSchema;
+  agentImplementation?: string | boolean;
   toolConcurrencyField?: SettingsFieldSchema;
   toolConcurrency: string | boolean;
 }
@@ -151,6 +155,8 @@ export function buildAgentProfileFields(
     commandTokens,
     acpModel,
     subAgentsEnabled,
+    agentImplementationField,
+    agentImplementation,
     toolConcurrencyField,
     toolConcurrency,
   } = input;
@@ -172,6 +178,13 @@ export function buildAgentProfileFields(
       agent_kind: "openhands",
       enable_sub_agents: subAgentsEnabled,
     };
+  if (
+    agentImplementationField &&
+    typeof agentImplementation === "string" &&
+    agentImplementation
+  ) {
+    fields.agent = agentImplementation;
+  }
   if (toolConcurrencyField) {
     // Reuse the schema-driven coercion/validation; throws on bad input.
     const coerced = coerceFieldValue(toolConcurrencyField, toolConcurrency);
@@ -260,6 +273,23 @@ export function AgentSettingsScreen({
   const [subAgentsEnabled, setSubAgentsEnabled] = useState(
     initialSubAgentsEnabled,
   );
+
+  // --- Concrete Agent implementation (OpenHands path) ---
+  // The backend registry publishes these choices dynamically. Hide the field
+  // for older agent-servers whose schema does not expose it.
+  const agentImplementationField = fields?.find(
+    (field) => field.key === AGENT_IMPLEMENTATION_FIELD_KEY,
+  );
+  const initialAgentImplementation = React.useMemo(() => {
+    if (!agentImplementationField) return "";
+    return normalizeFieldValue(
+      agentImplementationField,
+      agentSettingsSource?.[AGENT_IMPLEMENTATION_FIELD_KEY],
+    );
+  }, [agentImplementationField, agentSettingsSource]);
+  const [agentImplementation, setAgentImplementation] = useState<
+    string | boolean
+  >(initialAgentImplementation);
 
   // --- Parallel tool calls (OpenHands path) ---
   // Surfaced only when the backend schema exposes the field, so older
@@ -358,6 +388,10 @@ export function AgentSettingsScreen({
     setSubAgentsEnabled(initialSubAgentsEnabled);
   }, [initialSubAgentsEnabled]);
 
+  useEffect(() => {
+    setAgentImplementation(initialAgentImplementation);
+  }, [initialAgentImplementation]);
+
   // Sync the parallel-tool-calls input when settings reload
   useEffect(() => {
     setToolConcurrency(initialToolConcurrency);
@@ -441,6 +475,8 @@ export function AgentSettingsScreen({
       commandTokens,
       acpModel,
       subAgentsEnabled,
+      agentImplementationField,
+      agentImplementation,
       toolConcurrencyField,
       toolConcurrency,
     });
@@ -450,6 +486,7 @@ export function AgentSettingsScreen({
   const isOpenHandsDirty =
     !isAcp &&
     (subAgentsEnabled !== initialSubAgentsEnabled ||
+      agentImplementation !== initialAgentImplementation ||
       toolConcurrency !== initialToolConcurrency);
   const settingsDirty = isDirty || isOpenHandsDirty;
   // The single Save covers both the agent spec and ACP credentials, so it is
@@ -521,6 +558,14 @@ export function AgentSettingsScreen({
         agent_kind: "openhands",
         enable_sub_agents: subAgentsEnabled,
       };
+
+      if (
+        agentImplementationField &&
+        typeof agentImplementation === "string" &&
+        agentImplementation
+      ) {
+        agentSettingsDiff[AGENT_IMPLEMENTATION_FIELD_KEY] = agentImplementation;
+      }
 
       if (toolConcurrencyField) {
         let coerced: SettingsValue;
@@ -616,6 +661,15 @@ export function AgentSettingsScreen({
           setIsDirty(true);
         }}
       />
+
+      {!isAcp && agentImplementationField ? (
+        <SchemaField
+          field={agentImplementationField}
+          value={agentImplementation}
+          isDisabled={isSavingAny}
+          onChange={setAgentImplementation}
+        />
+      ) : null}
 
       {!isAcp && (
         <div className="flex flex-col gap-1.5">
