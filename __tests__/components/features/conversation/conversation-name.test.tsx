@@ -42,13 +42,7 @@ const {
 } = vi.hoisted(() => ({
   mockMutate: vi.fn(),
   mockDisplaySuccessToast: vi.fn(),
-  useActiveConversationMock: vi.fn(() => ({
-    data: {
-      conversation_id: "test-conversation-id",
-      title: "Test Conversation",
-      status: "RUNNING",
-    },
-  })),
+  useActiveConversationMock: vi.fn(),
   useConfigMock: vi.fn(() => ({
     data: {},
   })),
@@ -95,8 +89,7 @@ vi.mock("react-i18next", async () => {
           BUTTON$SHOW_AGENT_TOOLS_AND_METADATA: "Show Agent Tools",
           CONVERSATION$SHOW_SKILLS: "Show Skills",
           BUTTON$DISPLAY_COST: "Display Cost",
-          COMMON$CLOSE_CONVERSATION_STOP_RUNTIME:
-            "Stop Conversation (Runtime)",
+          COMMON$CLOSE_CONVERSATION_STOP_RUNTIME: "Stop Conversation (Runtime)",
           COMMON$STOP_CONVERSATION: "Stop Conversation",
           COMMON$DELETE_CONVERSATION: "Delete Conversation",
           CONVERSATION$SHARE_PUBLICLY: "Share Publicly",
@@ -136,6 +129,13 @@ describe("ConversationName", () => {
   });
 
   beforeEach(() => {
+    useActiveConversationMock.mockReturnValue({
+      data: {
+        conversation_id: "test-conversation-id",
+        title: "Test Conversation",
+        status: "RUNNING",
+      },
+    });
     useActiveBackendMock.mockReturnValue({
       backend: localBackend,
       orgId: null,
@@ -157,6 +157,22 @@ describe("ConversationName", () => {
     expect(container).toBeInTheDocument();
     expect(titleElement).toBeInTheDocument();
     expect(titleElement).toHaveTextContent("Test Conversation");
+  });
+
+  it("shows the implementation fixed for this conversation", () => {
+    useActiveConversationMock.mockReturnValue({
+      data: {
+        conversation_id: "test-conversation-id",
+        title: "Minimal conversation",
+        agent_implementation: "MinimalAgent",
+      },
+    });
+
+    renderConversationNameWithRouter();
+
+    expect(
+      screen.getByTestId("conversation-agent-implementation"),
+    ).toHaveTextContent("MinimalAgent");
   });
 
   it("should switch to edit mode on double click", async () => {

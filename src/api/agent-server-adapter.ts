@@ -78,6 +78,7 @@ export interface DirectConversationInfo {
       model?: string | null;
     } | null;
   } | null;
+  agent_implementation?: string | null;
   current_model_id?: string | null;
   current_model_name?: string | null;
   workspace?: {
@@ -335,6 +336,7 @@ export function toAppConversation(
     trigger: null,
     pr_number: [],
     agent_kind: isAcp ? "acp" : "openhands",
+    agent_implementation: info.agent_implementation ?? null,
     acp_server: acpServer,
     tags: info.tags ?? null,
     launched_agent_profile: info.launched_agent_profile ?? null,

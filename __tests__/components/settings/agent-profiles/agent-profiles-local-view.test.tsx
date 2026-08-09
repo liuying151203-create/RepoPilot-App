@@ -3,7 +3,10 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { useEffect } from "react";
 import type { AgentSettingsSaveControl } from "#/routes/agent-settings";
-import { AgentProfilesLocalView } from "#/components/features/settings/agent-profiles/agent-profiles-local-view";
+import {
+  AgentProfilesLocalView,
+  toAgentSettingsOverride,
+} from "#/components/features/settings/agent-profiles/agent-profiles-local-view";
 import AgentProfilesService from "#/api/agent-profiles-service/agent-profiles-service.api";
 import { displayErrorToast } from "#/utils/custom-toast-handlers";
 
@@ -116,6 +119,20 @@ describe("AgentProfilesLocalView save mapping", () => {
       profiles: [{ name: "default", model: "gpt-5" }],
       active_profile: "default",
     };
+  });
+
+  it("seeds the editor with the stored OpenHands Agent implementation", () => {
+    expect(
+      toAgentSettingsOverride({
+        agent_kind: "openhands",
+        agent: "MinimalAgent",
+        enable_sub_agents: false,
+        tool_concurrency_limit: 1,
+      } as never),
+    ).toMatchObject({
+      agent_kind: "openhands",
+      agent: "MinimalAgent",
+    });
   });
 
   it("saves an OpenHands profile with the selected llm_profile_ref", async () => {

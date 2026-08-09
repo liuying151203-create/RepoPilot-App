@@ -171,6 +171,16 @@ export function ConversationName() {
           </div>
         )}
 
+        {titleMode !== "edit" && conversation.agent_implementation && (
+          <span
+            className="shrink-0 rounded bg-neutral-700 px-1.5 py-0.5 text-xs text-neutral-200"
+            data-testid="conversation-agent-implementation"
+            title={t(I18nKey.SCHEMA$AGENT$LABEL)}
+          >
+            {conversation.agent_implementation}
+          </span>
+        )}
+
         {titleMode !== "edit" && (
           <div
             ref={ellipsisAnchorRef}

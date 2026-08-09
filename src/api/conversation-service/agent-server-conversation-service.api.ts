@@ -245,6 +245,7 @@ function requireDirectConversationInfo(item: unknown): DirectConversationInfo {
     sandbox_status: stringOrNull(item.sandbox_status),
     metrics: normalizeMetrics(item.metrics),
     agent: normalizeAgent(item.agent),
+    agent_implementation: stringOrNull(item.agent_implementation),
     workspace: normalizeWorkspace(item.workspace),
     tags: normalizeTags(item.tags),
     launched_agent_profile: normalizeLaunchedAgentProfile(

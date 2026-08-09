@@ -38,7 +38,7 @@ type ViewMode = "list" | "create" | "edit";
  * consumes for an existing profile. The stored ACP command is a shell string;
  * the form's init logic expects a token array, so split it here.
  */
-function toAgentSettingsOverride(
+export function toAgentSettingsOverride(
   profile: AgentProfile,
 ): Record<string, SettingsValue> {
   if (profile.agent_kind === "acp") {
@@ -52,6 +52,7 @@ function toAgentSettingsOverride(
   }
   return {
     agent_kind: "openhands",
+    agent: profile.agent,
     enable_sub_agents: profile.enable_sub_agents,
     tool_concurrency_limit: profile.tool_concurrency_limit,
   };

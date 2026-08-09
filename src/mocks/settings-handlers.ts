@@ -75,8 +75,8 @@ const MOCK_AGENT_SETTINGS_SCHEMA: NonNullable<
       fields: [
         {
           key: "agent",
-          label: "Agent",
-          description: "Select the registered Agent implementation.",
+          label: "Agent implementation",
+          description: "Choose the Agent implementation for new conversations.",
           section: "general",
           section_label: "General",
           value_type: "string",

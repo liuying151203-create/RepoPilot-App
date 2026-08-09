@@ -2720,9 +2720,9 @@
     "ca": "L'esquema de configuració de l'SDK no està disponible."
   },
   "SCHEMA$AGENT$DESCRIPTION": {
-    "en": "Agent class to use.",
+    "en": "Agent implementation to use for new conversations.",
     "ja": "使用するエージェントクラス。",
-    "zh-CN": "要使用的代理类。",
+    "zh-CN": "用于新建会话的 Agent 实现。",
     "zh-TW": "要使用的代理類別。",
     "ko-KR": "사용할 에이전트 클래스입니다.",
     "no": "Agentklasse som skal brukes.",
@@ -2737,9 +2737,9 @@
     "ca": "Classe d'agent a utilitzar."
   },
   "SCHEMA$AGENT$LABEL": {
-    "en": "Agent",
+    "en": "Agent implementation",
     "ja": "エージェント",
-    "zh-CN": "代理",
+    "zh-CN": "Agent implementation",
     "zh-TW": "代理",
     "ko-KR": "에이전트",
     "no": "Agent",

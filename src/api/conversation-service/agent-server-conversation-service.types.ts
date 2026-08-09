@@ -149,6 +149,12 @@ export interface AppConversation {
    * carry the ACP subprocess model for display).
    */
   agent_kind?: "openhands" | "acp" | null;
+  /**
+   * Registry key of the implementation fixed when this conversation was
+   * created, such as ``"CodeActAgent"`` or ``"MinimalAgent"``. ``null`` for
+   * ACP and older agent-server responses.
+   */
+  agent_implementation?: string | null;
   launched_agent_profile?: LaunchedAgentProfile | null;
   /**
    * For ACP conversations, the registry key of the ACP CLI server the
