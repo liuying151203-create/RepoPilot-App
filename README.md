@@ -2,9 +2,9 @@
 
 > 面向代码仓库维护的软件工程 Agent 平台
 
-RepoPilot-Harness 基于 OpenHands Agent Harness 进行二次开发，目标是让 LLM Agent 不只能够“阅读文件并执行命令”，还能够持续理解一个代码仓库的结构、语义、依赖关系和变更影响，在可追踪、可验证的执行闭环中完成代码维护任务。
+RepoPilot-Harness 基于 OpenHands Agent Harness 构建，目标是让 LLM Agent 不只能够“阅读文件并执行命令”，还能够持续理解一个代码仓库的结构、语义、依赖关系和变更影响，在可追踪、可验证的执行闭环中完成代码维护任务。
 
-本仓库 `RepoPilot-App` 是 RepoPilot-Harness 的应用与交互层代码库。目前保留了较多 OpenHands Agent Canvas 的基础设施，包括多后端管理、Agent 对话、终端与文件交互、Git 操作、自动化任务、本地开发栈和测试框架。Repository Intelligence、Code RAG、Repository Knowledge Graph 与 Evaluation Harness 是 RepoPilot 二次开发的核心演进方向；下文描述的是产品目标架构，具体能力以当前代码和版本说明为准。
+本仓库 `RepoPilot-App` 是 RepoPilot-Harness 的应用与交互层代码库，基于 OpenHands Agent Canvas 提供多后端管理、Agent 对话、终端、文件、Git 操作与本地开发栈。当前已接入 Repository Intelligence 面板，可在会话中开启仓库智能、构建或刷新索引，并展示任务相关文件与依赖上下文；Agent Server、Intelligence Tools、RepoPilotAgent 和 Evaluation Harness 位于配套的 `RepoPilot-Agent` 仓库。
 
 ## 项目目标
 
@@ -259,6 +259,11 @@ npm run desktop
 ```
 
 `dev:minimal` 默认通过 [http://localhost:3001](http://localhost:3001) 访问。更多启动器、Agent Server 版本覆盖和多后端说明参见 [开发指南](./docs/DEVELOPMENT.md)。
+
+连接单独在 WSL 中运行的 RepoPilot Agent Server 时，推荐在 `.env` 中配置
+`VITE_BACKEND_BASE_URL=http://127.0.0.1:8000`，然后使用
+`npm run dev:frontend`。进入本地会话后，右侧的 **Repository Intelligence**
+标签页可控制当前仓库的索引开关、Build/Refresh 和 Context 检索。
 
 ## 开发与验证
 
