@@ -1,7 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { LayoutGroup } from "framer-motion";
-import { Globe, ListTodo, SquareChevronRight } from "lucide-react";
+import {
+  BrainCircuit,
+  Globe,
+  ListTodo,
+  SquareChevronRight,
+} from "lucide-react";
 import DocumentIcon from "#/icons/document.svg?react";
 import DoubleCheckIcon from "#/icons/double-check.svg?react";
 import { EllipsisButton } from "#/components/features/conversation-panel/ellipsis-button";
@@ -99,6 +104,15 @@ export function ConversationTabs({
       tooltipContent: t(I18nKey.COMMON$PLANNER),
       tooltipAriaLabel: t(I18nKey.COMMON$PLANNER),
       label: t(I18nKey.COMMON$PLANNER),
+    },
+    {
+      tabValue: "intelligence",
+      isActive: isTabActive("intelligence"),
+      icon: BrainCircuit,
+      onClick: () => selectTab("intelligence"),
+      tooltipContent: t(I18nKey.REPOSITORY_INTELLIGENCE$TITLE),
+      tooltipAriaLabel: t(I18nKey.REPOSITORY_INTELLIGENCE$TITLE),
+      label: t(I18nKey.REPOSITORY_INTELLIGENCE$TITLE),
     },
     {
       tabValue: "terminal",

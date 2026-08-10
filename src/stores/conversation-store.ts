@@ -10,7 +10,8 @@ export type ConversationTab =
   | "browser"
   | "terminal"
   | "planner"
-  | "tasklist";
+  | "tasklist"
+  | "intelligence";
 
 export type ConversationMode = "code" | "plan";
 
