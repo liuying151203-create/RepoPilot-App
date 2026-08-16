@@ -1,9 +1,19 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BrainCircuit, GitBranch, SearchCode } from "lucide-react";
+import {
+  BrainCircuit,
+  GitBranch,
+  Network,
+  SearchCode,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import RepositoryIntelligenceService, {
+  type IntelligenceGraph,
+  type IntelligenceGraphNode,
+  type IntelligenceLevel,
   type RepositoryContext,
   type RepositoryIndexStatus,
 } from "#/api/repository-intelligence-service";
@@ -16,6 +26,42 @@ import {
   displaySuccessToast,
 } from "#/utils/custom-toast-handlers";
 import { cn } from "#/utils/utils";
+
+const LEVELS: {
+  value: IntelligenceLevel;
+  title: I18nKey;
+  description: I18nKey;
+  buildLabel: I18nKey;
+}[] = [
+  {
+    value: "repository_map",
+    title: I18nKey.REPOSITORY_INTELLIGENCE$LEVEL_REPOSITORY_MAP,
+    description:
+      I18nKey.REPOSITORY_INTELLIGENCE$LEVEL_REPOSITORY_MAP_DESCRIPTION,
+    buildLabel: I18nKey.REPOSITORY_INTELLIGENCE$BUILD_REPOSITORY_MAP,
+  },
+  {
+    value: "code_search",
+    title: I18nKey.REPOSITORY_INTELLIGENCE$LEVEL_CODE_SEARCH,
+    description: I18nKey.REPOSITORY_INTELLIGENCE$LEVEL_CODE_SEARCH_DESCRIPTION,
+    buildLabel: I18nKey.REPOSITORY_INTELLIGENCE$BUILD_SEARCH_INDEX,
+  },
+  {
+    value: "context_graph",
+    title: I18nKey.REPOSITORY_INTELLIGENCE$LEVEL_CONTEXT_GRAPH,
+    description:
+      I18nKey.REPOSITORY_INTELLIGENCE$LEVEL_CONTEXT_GRAPH_DESCRIPTION,
+    buildLabel: I18nKey.REPOSITORY_INTELLIGENCE$BUILD_INTELLIGENCE_INDEX,
+  },
+];
+
+export const shouldPollIndexStatus = (status?: RepositoryIndexStatus) =>
+  status?.providers.some(
+    (provider) =>
+      provider.selected &&
+      (provider.repository_state === "preparing" ||
+        provider.repository_state === "indexing"),
+  ) ?? false;
 
 function MetricCard({
   label,
@@ -34,14 +80,51 @@ function MetricCard({
 
 function ContextSection({ context }: { context: RepositoryContext }) {
   const { t } = useTranslation("openhands");
+  const showMatches = context.index_level !== "repository_map";
   return (
     <section className="space-y-4 rounded-lg border border-[var(--oh-border)] p-4">
       <div>
         <h3 className="text-sm font-semibold text-white">
-          {t(I18nKey.REPOSITORY_INTELLIGENCE$RETRIEVED_CONTEXT)}
+          {t(I18nKey.REPOSITORY_INTELLIGENCE$TASK_CONTEXT_PREVIEW)}
         </h3>
         <p className="mt-1 text-xs text-[var(--oh-muted)]">{context.summary}</p>
       </div>
+
+      {showMatches && context.matches.length > 0 && (
+        <div>
+          <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--oh-muted)]">
+            {t(I18nKey.REPOSITORY_INTELLIGENCE$CODE_MATCHES)}
+          </h4>
+          <div className="space-y-2">
+            {context.matches.map((match) => (
+              <article
+                key={`${match.path}-${match.line}-${match.symbol}`}
+                className="rounded-lg border border-[var(--oh-border)] bg-black/20 p-3"
+              >
+                <div className="flex justify-between gap-3 font-mono text-xs text-white">
+                  <span className="truncate">{match.path}</span>
+                  {match.line && (
+                    <span className="text-[var(--oh-muted)]">
+                      :{match.line}
+                    </span>
+                  )}
+                </div>
+                {match.symbol && (
+                  <div className="mt-1 text-xs text-emerald-300">
+                    {match.symbol}
+                  </div>
+                )}
+                {match.snippet && (
+                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-xs text-[var(--oh-muted)]">
+                    {match.snippet}
+                  </pre>
+                )}
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div>
         <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--oh-muted)]">
           {t(I18nKey.REPOSITORY_INTELLIGENCE$RELEVANT_FILES)}
@@ -54,6 +137,7 @@ function ContextSection({ context }: { context: RepositoryContext }) {
           ))}
         </div>
       </div>
+
       {context.relationships.length > 0 && (
         <div>
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--oh-muted)]">
@@ -74,20 +158,152 @@ function ContextSection({ context }: { context: RepositoryContext }) {
           </div>
         </div>
       )}
+
       {context.tests.length > 0 && (
         <div>
           <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--oh-muted)]">
             {t(I18nKey.REPOSITORY_INTELLIGENCE$TESTS)}
           </h4>
-          <div className="space-y-1 text-sm text-white">
+          <div className="space-y-1 font-mono text-sm text-white">
             {context.tests.map((path) => (
-              <div key={path} className="font-mono">
-                {path}
-              </div>
+              <div key={path}>{path}</div>
             ))}
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+function GraphWorkspace({
+  graph,
+  onExpand,
+}: {
+  graph: IntelligenceGraph;
+  onExpand: (node: IntelligenceGraphNode) => void;
+}) {
+  const { t } = useTranslation("openhands");
+  const [zoom, setZoom] = useState(1);
+  const [selected, setSelected] = useState<IntelligenceGraphNode | null>(null);
+  const positions = useMemo(() => {
+    const radius = 130;
+    return new Map(
+      graph.nodes.map((node, index) => {
+        const angle = (index / Math.max(graph.nodes.length, 1)) * Math.PI * 2;
+        return [
+          node.id,
+          {
+            x: 200 + Math.cos(angle) * radius,
+            y: 170 + Math.sin(angle) * radius,
+          },
+        ];
+      }),
+    );
+  }, [graph.nodes]);
+
+  return (
+    <section className="rounded-lg border border-[var(--oh-border)] p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-white">
+          <Network className="size-4" />
+          {t(I18nKey.REPOSITORY_INTELLIGENCE$GRAPH_WORKSPACE)}
+        </h3>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            aria-label={t(I18nKey.REPOSITORY_INTELLIGENCE$ZOOM_OUT)}
+            onClick={() => setZoom((value) => Math.max(0.5, value - 0.2))}
+            className="rounded border border-[var(--oh-border)] p-1 text-white"
+          >
+            <ZoomOut className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={t(I18nKey.REPOSITORY_INTELLIGENCE$ZOOM_IN)}
+            onClick={() => setZoom((value) => Math.min(2, value + 0.2))}
+            className="rounded border border-[var(--oh-border)] p-1 text-white"
+          >
+            <ZoomIn className="size-4" />
+          </button>
+        </div>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="overflow-hidden rounded bg-black/20">
+          <svg viewBox="0 0 400 340" className="h-[340px] w-full" role="img">
+            <g
+              transform={`translate(${200 - 200 * zoom} ${170 - 170 * zoom}) scale(${zoom})`}
+            >
+              {graph.edges.map((edge) => {
+                const source = positions.get(edge.source);
+                const target = positions.get(edge.target);
+                if (!source || !target) return null;
+                return (
+                  <line
+                    key={edge.id}
+                    x1={source.x}
+                    y1={source.y}
+                    x2={target.x}
+                    y2={target.y}
+                    stroke="currentColor"
+                    className="text-white/20"
+                  />
+                );
+              })}
+              {graph.nodes.map((node) => {
+                const position = positions.get(node.id);
+                if (!position) return null;
+                return (
+                  <g
+                    key={node.id}
+                    transform={`translate(${position.x} ${position.y})`}
+                    onClick={() => setSelected(node)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelected(node);
+                      }
+                    }}
+                    className="cursor-pointer"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={node.caption}
+                  >
+                    <circle
+                      r="18"
+                      className="fill-emerald-500/80 stroke-white/50"
+                    />
+                    <text
+                      y="32"
+                      textAnchor="middle"
+                      className="fill-white text-[10px]"
+                    >
+                      {node.caption.slice(0, 24)}
+                    </text>
+                  </g>
+                );
+              })}
+            </g>
+          </svg>
+        </div>
+        <aside className="rounded bg-black/20 p-3 text-xs text-[var(--oh-muted)]">
+          {selected ? (
+            <div className="space-y-2">
+              <div className="font-semibold text-white">{selected.caption}</div>
+              <div>{selected.type}</div>
+              {selected.summary && <p>{selected.summary}</p>}
+              <button
+                type="button"
+                onClick={() => onExpand(selected)}
+                className="rounded border border-[var(--oh-border)] px-2 py-1 text-white"
+              >
+                {t(I18nKey.REPOSITORY_INTELLIGENCE$EXPAND_NEIGHBORS)}
+              </button>
+            </div>
+          ) : (
+            t(I18nKey.REPOSITORY_INTELLIGENCE$SELECT_GRAPH_NODE)
+          )}
+        </aside>
+      </div>
     </section>
   );
 }
@@ -99,6 +315,7 @@ function RepositoryIntelligenceTab() {
   const queryClient = useQueryClient();
   const [task, setTask] = useState("");
   const [context, setContext] = useState<RepositoryContext | null>(null);
+  const [graph, setGraph] = useState<IntelligenceGraph | null>(null);
   const repositoryPath = conversation?.workspace?.working_dir?.trim() ?? "";
   const isLocal = backend.kind === "local";
   const statusKey = ["repository-intelligence", repositoryPath];
@@ -109,6 +326,8 @@ function RepositoryIntelligenceTab() {
     enabled: isLocal && Boolean(repositoryPath),
     retry: false,
     staleTime: 10_000,
+    refetchInterval: (query) =>
+      shouldPollIndexStatus(query.state.data) ? 2_000 : false,
     meta: { disableToast: true },
   });
 
@@ -123,14 +342,51 @@ function RepositoryIntelligenceTab() {
     onError: (error) => displayErrorToast(error.message),
   });
 
-  const index = useMutation({
-    mutationFn: (refresh: boolean) =>
-      refresh
-        ? RepositoryIntelligenceService.refreshIndex(repositoryPath)
-        : RepositoryIntelligenceService.buildIndex(repositoryPath),
+  const level = useMutation({
+    mutationFn: (value: IntelligenceLevel) =>
+      RepositoryIntelligenceService.setLevel(repositoryPath, value),
     onSuccess: (next) => {
       updateStatus(next);
-      displaySuccessToast(t(I18nKey.REPOSITORY_INTELLIGENCE$INDEX_COMPLETE));
+      setContext(null);
+      if (next.index_level !== "context_graph") setGraph(null);
+    },
+    onError: (error) => displayErrorToast(error.message),
+  });
+
+  const index = useMutation({
+    mutationFn: ({
+      refresh,
+      value,
+    }: {
+      refresh: boolean;
+      value: IntelligenceLevel;
+    }) =>
+      refresh
+        ? RepositoryIntelligenceService.refreshIndex(repositoryPath, value)
+        : RepositoryIntelligenceService.buildIndex(repositoryPath, value),
+    onSuccess: (next) => {
+      updateStatus(next);
+      const selected = next.providers.find(
+        (provider) => provider.capability === next.index_level,
+      );
+      if (selected?.repository_state === "error") {
+        displayErrorToast(
+          selected.detail ||
+            t(I18nKey.REPOSITORY_INTELLIGENCE$CAPABILITY_UNAVAILABLE),
+        );
+      } else {
+        displaySuccessToast(t(I18nKey.REPOSITORY_INTELLIGENCE$INDEX_COMPLETE));
+      }
+    },
+    onError: (error) => displayErrorToast(error.message),
+  });
+
+  const clear = useMutation({
+    mutationFn: () => RepositoryIntelligenceService.clearIndex(repositoryPath),
+    onSuccess: (next) => {
+      updateStatus(next);
+      setContext(null);
+      setGraph(null);
     },
     onError: (error) => displayErrorToast(error.message),
   });
@@ -139,6 +395,26 @@ function RepositoryIntelligenceTab() {
     mutationFn: () =>
       RepositoryIntelligenceService.getContext(repositoryPath, task.trim()),
     onSuccess: setContext,
+    onError: (error) => displayErrorToast(error.message),
+  });
+
+  const loadGraph = useMutation({
+    mutationFn: (nodeId?: string) =>
+      RepositoryIntelligenceService.getGraph(repositoryPath, nodeId),
+    onSuccess: (next) => {
+      setGraph((current) => {
+        if (!current) return next;
+        const nodes = new Map(current.nodes.map((node) => [node.id, node]));
+        next.nodes.forEach((node) => nodes.set(node.id, node));
+        const edges = new Map(current.edges.map((edge) => [edge.id, edge]));
+        next.edges.forEach((edge) => edges.set(edge.id, edge));
+        return {
+          ...next,
+          nodes: [...nodes.values()],
+          edges: [...edges.values()],
+        };
+      });
+    },
     onError: (error) => displayErrorToast(error.message),
   });
 
@@ -152,20 +428,18 @@ function RepositoryIntelligenceTab() {
 
   const current = status.data;
   const enabled = current?.enabled ?? false;
+  const selectedLevel = current?.index_level ?? "repository_map";
   const isIndexed = current?.state === "indexed";
-  const busy = toggle.isPending || index.isPending;
-  const stateLabel = (() => {
-    switch (current?.state) {
-      case "indexed":
-        return t(I18nKey.REPOSITORY_INTELLIGENCE$INDEXED);
-      case "building":
-        return t(I18nKey.REPOSITORY_INTELLIGENCE$BUILDING);
-      case "error":
-        return t(I18nKey.ERROR$GENERIC);
-      default:
-        return t(I18nKey.REPOSITORY_INTELLIGENCE$NOT_INDEXED);
-    }
-  })();
+  const selectedProvider = current?.providers.find(
+    (provider) => provider.capability === selectedLevel,
+  );
+  const selectedReady = selectedProvider?.service_state === "ready";
+  const selectedBuilt = selectedProvider?.repository_state === "indexed";
+  const busy =
+    toggle.isPending || level.isPending || index.isPending || clear.isPending;
+  const selectedDefinition = LEVELS.find(
+    (item) => item.value === selectedLevel,
+  )!;
 
   return (
     <main className="h-full space-y-5 overflow-y-auto p-4 custom-scrollbar-always">
@@ -184,9 +458,7 @@ function RepositoryIntelligenceTab() {
         <ToggleSwitch
           enabled={enabled}
           label={t(I18nKey.REPOSITORY_INTELLIGENCE$TITLE)}
-          onToggle={() => {
-            if (!busy) toggle.mutate(!enabled);
-          }}
+          onToggle={() => !busy && toggle.mutate(!enabled)}
           className={cn(busy && "pointer-events-none opacity-50")}
         />
       </header>
@@ -197,15 +469,51 @@ function RepositoryIntelligenceTab() {
         </p>
       )}
 
+      <section className="grid gap-2 md:grid-cols-3">
+        {LEVELS.map((item) => {
+          const provider = current?.providers.find(
+            (candidate) => candidate.capability === item.value,
+          );
+          const selected = selectedLevel === item.value;
+          return (
+            <button
+              key={item.value}
+              type="button"
+              disabled={!enabled || busy}
+              onClick={() => level.mutate(item.value)}
+              className={cn(
+                "rounded-lg border p-3 text-left disabled:opacity-40",
+                selected
+                  ? "border-emerald-400 bg-emerald-500/10"
+                  : "border-[var(--oh-border)] bg-black/10",
+              )}
+            >
+              <div className="text-sm font-semibold text-white">
+                {t(item.title)}
+              </div>
+              <p className="mt-1 text-xs text-[var(--oh-muted)]">
+                {t(item.description)}
+              </p>
+              <div className="mt-3 text-xs text-[var(--oh-muted)]">
+                {provider?.repository_state === "indexed"
+                  ? t(I18nKey.REPOSITORY_INTELLIGENCE$INDEXED)
+                  : provider?.repository_state === "preparing" ||
+                      provider?.repository_state === "indexing"
+                    ? t(I18nKey.REPOSITORY_INTELLIGENCE$BUILDING)
+                    : provider?.service_state === "ready"
+                      ? t(I18nKey.REPOSITORY_INTELLIGENCE$READY)
+                      : t(I18nKey.REPOSITORY_INTELLIGENCE$UNAVAILABLE)}
+              </div>
+            </button>
+          );
+        })}
+      </section>
+
       <section className="rounded-lg border border-[var(--oh-border)] p-4">
-        <div className="text-xs text-[var(--oh-muted)]">
-          {t(I18nKey.CONVERSATION$REPOSITORY)}
-        </div>
-        <div className="mt-1 break-all font-mono text-sm text-white">
+        <div className="break-all font-mono text-sm text-white">
           {current?.repository_name ?? repositoryPath}
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2">
-          <MetricCard label={t(I18nKey.COMMON$STATUS)} value={stateLabel} />
           <MetricCard
             label={t(I18nKey.COMMON$FILES)}
             value={current?.file_count ?? 0}
@@ -214,51 +522,61 @@ function RepositoryIntelligenceTab() {
             label={t(I18nKey.REPOSITORY_INTELLIGENCE$SYMBOLS)}
             value={current?.symbol_count ?? 0}
           />
-          <MetricCard
-            label={t(I18nKey.REPOSITORY_INTELLIGENCE$GRAPH)}
-            value={
-              current?.graph_ready
-                ? t(I18nKey.REPOSITORY_INTELLIGENCE$READY)
-                : t(I18nKey.REPOSITORY_INTELLIGENCE$UNAVAILABLE)
-            }
-          />
         </div>
+        {((!selectedReady && selectedLevel !== "repository_map") ||
+          (selectedLevel === "context_graph" &&
+            selectedBuilt &&
+            !selectedProvider?.supports_visualization)) && (
+          <p className="mt-3 text-xs text-amber-300">
+            {t(I18nKey.REPOSITORY_INTELLIGENCE$CAPABILITY_UNAVAILABLE)}
+          </p>
+        )}
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
-            disabled={!enabled || busy}
-            onClick={() => index.mutate(false)}
+            disabled={
+              !enabled ||
+              busy ||
+              (!selectedReady && selectedLevel !== "repository_map")
+            }
+            onClick={() =>
+              index.mutate({ refresh: false, value: selectedLevel })
+            }
             className="rounded-md bg-white px-3 py-2 text-sm font-medium text-black disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {t(I18nKey.REPOSITORY_INTELLIGENCE$BUILD_INDEX)}
+            {t(selectedDefinition.buildLabel)}
           </button>
           <button
             type="button"
             disabled={!enabled || !isIndexed || busy}
-            onClick={() => index.mutate(true)}
+            onClick={() =>
+              index.mutate({ refresh: true, value: selectedLevel })
+            }
             className="rounded-md border border-[var(--oh-border)] px-3 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-40"
           >
             {t(I18nKey.REPOSITORY_INTELLIGENCE$REFRESH_INDEX)}
           </button>
+          <button
+            type="button"
+            disabled={!isIndexed || busy}
+            onClick={() => clear.mutate()}
+            className="rounded-md border border-red-500/30 px-3 py-2 text-sm text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {t(I18nKey.REPOSITORY_INTELLIGENCE$CLEAR_INDEX)}
+          </button>
+          {selectedLevel === "context_graph" && selectedBuilt && (
+            <button
+              type="button"
+              disabled={
+                loadGraph.isPending || !selectedProvider?.supports_visualization
+              }
+              onClick={() => loadGraph.mutate(undefined)}
+              className="rounded-md border border-[var(--oh-border)] px-3 py-2 text-sm text-white disabled:opacity-40"
+            >
+              {t(I18nKey.REPOSITORY_INTELLIGENCE$OPEN_GRAPH)}
+            </button>
+          )}
         </div>
-        {current?.providers && current.providers.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
-            {current.providers.map((provider) => (
-              <span
-                key={provider.name}
-                title={provider.detail ?? undefined}
-                className={cn(
-                  "rounded-full border px-2 py-1 text-xs",
-                  provider.available
-                    ? "border-emerald-500/40 text-emerald-300"
-                    : "border-[var(--oh-border)] text-[var(--oh-muted)]",
-                )}
-              >
-                {provider.name}
-              </span>
-            ))}
-          </div>
-        )}
       </section>
 
       <section className="space-y-3">
@@ -266,8 +584,11 @@ function RepositoryIntelligenceTab() {
           className="block text-sm font-medium text-white"
           htmlFor="repository-context-task"
         >
-          {t(I18nKey.REPOSITORY_INTELLIGENCE$RETRIEVED_CONTEXT)}
+          {t(I18nKey.REPOSITORY_INTELLIGENCE$TASK_CONTEXT_PREVIEW)}
         </label>
+        <p className="text-xs text-[var(--oh-muted)]">
+          {t(I18nKey.REPOSITORY_INTELLIGENCE$TASK_PREVIEW_HELP)}
+        </p>
         <textarea
           id="repository-context-task"
           value={task}
@@ -290,6 +611,12 @@ function RepositoryIntelligenceTab() {
       </section>
 
       {context && <ContextSection context={context} />}
+      {graph && (
+        <GraphWorkspace
+          graph={graph}
+          onExpand={(node) => loadGraph.mutate(node.id)}
+        />
+      )}
     </main>
   );
 }

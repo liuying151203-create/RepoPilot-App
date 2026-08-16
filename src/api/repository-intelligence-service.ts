@@ -5,7 +5,24 @@ export interface ProviderStatus {
   configured: boolean;
   available: boolean;
   detail: string | null;
+  service_state: "unavailable" | "ready";
+  repository_state:
+    | "not_built"
+    | "preparing"
+    | "indexing"
+    | "indexed"
+    | "error";
+  capability: IntelligenceCapability;
+  selected: boolean;
+  item_count: number;
+  supports_visualization: boolean;
 }
+
+export type IntelligenceLevel =
+  | "repository_map"
+  | "code_search"
+  | "context_graph";
+export type IntelligenceCapability = IntelligenceLevel;
 
 export interface RepositoryIndexStatus {
   repository_path: string;
@@ -18,6 +35,8 @@ export interface RepositoryIndexStatus {
   graph_ready: boolean;
   updated_at: string | null;
   providers: ProviderStatus[];
+  index_level: IntelligenceLevel;
+  capabilities: IntelligenceCapability[];
   error: string | null;
 }
 
@@ -54,7 +73,33 @@ export interface RepositoryContext {
   tests: string[];
   matches: CodeMatch[];
   providers_used: string[];
+  providers_queried: string[];
+  capabilities_used: IntelligenceCapability[];
+  capability_contributions: Partial<Record<IntelligenceCapability, number>>;
+  index_level: IntelligenceLevel;
   summary: string;
+}
+
+export interface IntelligenceGraphNode {
+  id: string;
+  type: string;
+  caption: string;
+  summary: string | null;
+  properties: Record<string, unknown>;
+}
+
+export interface IntelligenceGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  relation: string;
+}
+
+export interface IntelligenceGraph {
+  nodes: IntelligenceGraphNode[];
+  edges: IntelligenceGraphEdge[];
+  truncated: boolean;
+  index_level: IntelligenceLevel;
 }
 
 interface ErrorPayload {
@@ -102,18 +147,51 @@ class RepositoryIntelligenceService {
     });
   }
 
-  static buildIndex(repositoryPath: string): Promise<RepositoryIndexStatus> {
-    return request("/api/repository-intelligence/indexes", {
-      method: "POST",
-      body: JSON.stringify({ repository_path: repositoryPath }),
+  static setLevel(
+    repositoryPath: string,
+    indexLevel: IntelligenceLevel,
+  ): Promise<RepositoryIndexStatus> {
+    return request("/api/repository-intelligence/level", {
+      method: "PUT",
+      body: JSON.stringify({
+        repository_path: repositoryPath,
+        index_level: indexLevel,
+      }),
     });
   }
 
-  static refreshIndex(repositoryPath: string): Promise<RepositoryIndexStatus> {
+  static buildIndex(
+    repositoryPath: string,
+    indexLevel: IntelligenceLevel,
+  ): Promise<RepositoryIndexStatus> {
+    return request("/api/repository-intelligence/indexes", {
+      method: "POST",
+      body: JSON.stringify({
+        repository_path: repositoryPath,
+        index_level: indexLevel,
+      }),
+    });
+  }
+
+  static refreshIndex(
+    repositoryPath: string,
+    indexLevel: IntelligenceLevel,
+  ): Promise<RepositoryIndexStatus> {
     return request("/api/repository-intelligence/indexes/refresh", {
       method: "POST",
-      body: JSON.stringify({ repository_path: repositoryPath }),
+      body: JSON.stringify({
+        repository_path: repositoryPath,
+        index_level: indexLevel,
+      }),
     });
+  }
+
+  static clearIndex(repositoryPath: string): Promise<RepositoryIndexStatus> {
+    const params = new URLSearchParams({ repository_path: repositoryPath });
+    return request(
+      `/api/repository-intelligence/indexes?${params.toString()}`,
+      { method: "DELETE" },
+    );
   }
 
   static getContext(
@@ -128,6 +206,18 @@ class RepositoryIntelligenceService {
         limit: 20,
       }),
     });
+  }
+
+  static getGraph(
+    repositoryPath: string,
+    nodeId?: string,
+  ): Promise<IntelligenceGraph> {
+    const endpoint = nodeId ? "graph/neighborhood" : "graph";
+    const params = new URLSearchParams({ repository_path: repositoryPath });
+    if (nodeId) params.set("node_id", nodeId);
+    return request(
+      `/api/repository-intelligence/${endpoint}?${params.toString()}`,
+    );
   }
 }
 

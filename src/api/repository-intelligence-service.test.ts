@@ -77,6 +77,48 @@ describe("RepositoryIntelligenceService", () => {
     );
   });
 
+  it("persists the selected intelligence level and builds that level", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ index_level: "code_search" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await RepositoryIntelligenceService.setLevel(
+      "workspace/project",
+      "code_search",
+    );
+    await RepositoryIntelligenceService.buildIndex(
+      "workspace/project",
+      "code_search",
+    );
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8000/api/repository-intelligence/level",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          repository_path: "workspace/project",
+          index_level: "code_search",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8000/api/repository-intelligence/indexes",
+      expect.objectContaining({
+        body: JSON.stringify({
+          repository_path: "workspace/project",
+          index_level: "code_search",
+        }),
+      }),
+    );
+  });
+
   it("surfaces agent-server error details", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

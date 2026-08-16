@@ -1,7 +1,9 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "../../test-utils";
-import RepositoryIntelligenceTab from "./repository-intelligence-tab";
+import RepositoryIntelligenceTab, {
+  shouldPollIndexStatus,
+} from "./repository-intelligence-tab";
 
 const {
   buildIndexMock,
@@ -9,12 +11,18 @@ const {
   getStatusMock,
   refreshIndexMock,
   setEnabledMock,
+  setLevelMock,
+  getGraphMock,
+  clearIndexMock,
 } = vi.hoisted(() => ({
   buildIndexMock: vi.fn(),
   getContextMock: vi.fn(),
   getStatusMock: vi.fn(),
   refreshIndexMock: vi.fn(),
   setEnabledMock: vi.fn(),
+  setLevelMock: vi.fn(),
+  getGraphMock: vi.fn(),
+  clearIndexMock: vi.fn(),
 }));
 
 vi.mock("#/contexts/active-backend-context", () => ({
@@ -34,6 +42,9 @@ vi.mock("#/api/repository-intelligence-service", () => ({
     getStatus: getStatusMock,
     refreshIndex: refreshIndexMock,
     setEnabled: setEnabledMock,
+    setLevel: setLevelMock,
+    getGraph: getGraphMock,
+    clearIndex: clearIndexMock,
   },
 }));
 
@@ -53,6 +64,8 @@ const disabledStatus = {
   graph_ready: false,
   updated_at: null,
   providers: [],
+  index_level: "repository_map" as const,
+  capabilities: ["repository_map" as const],
   error: null,
 };
 
@@ -66,11 +79,70 @@ const indexedStatus = {
   graph_ready: true,
 };
 
+const codeSearchStatus = {
+  ...indexedStatus,
+  index_level: "code_search" as const,
+  capabilities: ["repository_map" as const, "code_search" as const],
+  providers: [
+    {
+      name: "internal-search-engine",
+      configured: true,
+      available: true,
+      detail: "ready",
+      service_state: "ready" as const,
+      repository_state: "not_built" as const,
+      capability: "code_search" as const,
+      selected: true,
+      item_count: 0,
+      supports_visualization: false,
+    },
+  ],
+};
+
+const contextGraphStatus = {
+  ...indexedStatus,
+  index_level: "context_graph" as const,
+  capabilities: [
+    "repository_map" as const,
+    "code_search" as const,
+    "context_graph" as const,
+  ],
+  providers: [
+    {
+      name: "internal-graph-engine",
+      configured: true,
+      available: true,
+      detail: "ready",
+      service_state: "ready" as const,
+      repository_state: "indexed" as const,
+      capability: "context_graph" as const,
+      selected: true,
+      item_count: 2,
+      supports_visualization: true,
+    },
+  ],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   getStatusMock.mockResolvedValue(disabledStatus);
   setEnabledMock.mockResolvedValue({ ...disabledStatus, enabled: true });
+  setLevelMock.mockResolvedValue(codeSearchStatus);
   buildIndexMock.mockResolvedValue(indexedStatus);
+  getGraphMock.mockResolvedValue({
+    nodes: [
+      {
+        id: "service:inventory",
+        type: "Service",
+        caption: "Inventory",
+        summary: "Inventory service",
+        properties: {},
+      },
+    ],
+    edges: [],
+    truncated: false,
+    index_level: "context_graph",
+  });
   getContextMock.mockResolvedValue({
     task: "restore inventory",
     repository_path: "D:/dev/example",
@@ -87,17 +159,36 @@ beforeEach(() => {
     tests: ["test_orders.py"],
     matches: [],
     providers_used: ["local"],
+    providers_queried: ["local"],
+    capabilities_used: ["repository_map"],
+    capability_contributions: { repository_map: 2 },
+    index_level: "repository_map",
     summary: "Repository context ready",
   });
 });
 
 describe("RepositoryIntelligenceTab", () => {
+  it("polls only while the selected capability is being built", () => {
+    expect(
+      shouldPollIndexStatus({
+        ...codeSearchStatus,
+        providers: [
+          {
+            ...codeSearchStatus.providers[0],
+            repository_state: "indexing",
+          },
+        ],
+      }),
+    ).toBe(true);
+    expect(shouldPollIndexStatus(codeSearchStatus)).toBe(false);
+  });
+
   it("persists enablement, builds the index, and renders retrieved context", async () => {
     renderWithProviders(<RepositoryIntelligenceTab />);
 
     const toggle = await screen.findByRole("switch");
     const build = screen.getByRole("button", {
-      name: "REPOSITORY_INTELLIGENCE$BUILD_INDEX",
+      name: "REPOSITORY_INTELLIGENCE$BUILD_REPOSITORY_MAP",
     });
     expect(build).toBeDisabled();
 
@@ -109,7 +200,10 @@ describe("RepositoryIntelligenceTab", () => {
 
     fireEvent.click(build);
     await waitFor(() =>
-      expect(buildIndexMock).toHaveBeenCalledWith("D:/dev/example"),
+      expect(buildIndexMock).toHaveBeenCalledWith(
+        "D:/dev/example",
+        "repository_map",
+      ),
     );
 
     const task = screen.getByPlaceholderText(
@@ -130,5 +224,52 @@ describe("RepositoryIntelligenceTab", () => {
       "D:/dev/example",
       "restore inventory",
     );
+  });
+
+  it("switches capability levels without exposing internal engine names", async () => {
+    getStatusMock.mockResolvedValue(indexedStatus);
+    renderWithProviders(<RepositoryIntelligenceTab />);
+
+    const levelButton = (
+      await screen.findByText("REPOSITORY_INTELLIGENCE$LEVEL_CODE_SEARCH")
+    ).closest("button")!;
+    await waitFor(() => expect(levelButton).toBeEnabled());
+    fireEvent.click(levelButton);
+
+    await waitFor(() =>
+      expect(setLevelMock).toHaveBeenCalledWith(
+        "D:/dev/example",
+        "code_search",
+      ),
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "REPOSITORY_INTELLIGENCE$BUILD_SEARCH_INDEX",
+      }),
+    ).toBeEnabled();
+    expect(
+      screen.queryByText("internal-search-engine"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens graph nodes with keyboard navigation", async () => {
+    getStatusMock.mockResolvedValue(contextGraphStatus);
+    renderWithProviders(<RepositoryIntelligenceTab />);
+
+    const openGraph = await screen.findByRole("button", {
+      name: "REPOSITORY_INTELLIGENCE$OPEN_GRAPH",
+    });
+    await waitFor(() => expect(openGraph).toBeEnabled());
+    fireEvent.click(openGraph);
+
+    const node = await screen.findByRole("button", { name: "Inventory" });
+    fireEvent.keyDown(node, { key: "Enter" });
+
+    expect(screen.getByText("Inventory service")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "REPOSITORY_INTELLIGENCE$EXPAND_NEIGHBORS",
+      }),
+    ).toBeEnabled();
   });
 });
