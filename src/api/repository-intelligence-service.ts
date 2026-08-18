@@ -16,6 +16,15 @@ export interface ProviderStatus {
   selected: boolean;
   item_count: number;
   supports_visualization: boolean;
+  credential_configured?: boolean;
+  requires_credential?: boolean;
+}
+
+export interface RepositoryIntelligenceCredentials {
+  code_search_configured: boolean;
+  code_search_source: "none" | "environment" | "secure_store";
+  secure_storage_available: boolean;
+  secure_storage_detail: string | null;
 }
 
 export type IntelligenceLevel =
@@ -38,6 +47,39 @@ export interface RepositoryIndexStatus {
   index_level: IntelligenceLevel;
   capabilities: IntelligenceCapability[];
   error: string | null;
+}
+
+export type IndexTaskState =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelling"
+  | "cancelled";
+
+export interface IndexTaskLog {
+  timestamp: string;
+  level: "info" | "warning" | "error";
+  stage: IntelligenceCapability | null;
+  progress: number;
+  message: string;
+}
+
+export interface RepositoryIndexTask {
+  id: string;
+  repository_path: string;
+  index_level: IntelligenceLevel;
+  state: IndexTaskState;
+  progress: number;
+  stage: IntelligenceCapability | null;
+  attempt: number;
+  max_attempts: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  logs: IndexTaskLog[];
+  result: RepositoryIndexStatus | null;
 }
 
 export interface CodeSymbol {
@@ -132,6 +174,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 class RepositoryIntelligenceService {
+  static getCredentials(): Promise<RepositoryIntelligenceCredentials> {
+    return request("/api/repository-intelligence/credentials");
+  }
+
+  static setCodeSearchCredential(
+    apiKey: string,
+  ): Promise<RepositoryIntelligenceCredentials> {
+    return request("/api/repository-intelligence/credentials/code-search", {
+      method: "PUT",
+      body: JSON.stringify({ api_key: apiKey }),
+    });
+  }
+
+  static clearCodeSearchCredential(): Promise<RepositoryIntelligenceCredentials> {
+    return request("/api/repository-intelligence/credentials/code-search", {
+      method: "DELETE",
+    });
+  }
+
   static getStatus(repositoryPath: string): Promise<RepositoryIndexStatus> {
     const params = new URLSearchParams({ repository_path: repositoryPath });
     return request(`/api/repository-intelligence/status?${params.toString()}`);
@@ -184,6 +245,42 @@ class RepositoryIntelligenceService {
         index_level: indexLevel,
       }),
     });
+  }
+
+  static startIndexTask(
+    repositoryPath: string,
+    indexLevel: IntelligenceLevel,
+  ): Promise<RepositoryIndexTask> {
+    return request("/api/repository-intelligence/index-tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        repository_path: repositoryPath,
+        index_level: indexLevel,
+      }),
+    });
+  }
+
+  static getLatestIndexTask(
+    repositoryPath: string,
+  ): Promise<RepositoryIndexTask | null> {
+    const params = new URLSearchParams({ repository_path: repositoryPath });
+    return request(
+      `/api/repository-intelligence/index-tasks/latest?${params.toString()}`,
+    );
+  }
+
+  static retryIndexTask(taskId: string): Promise<RepositoryIndexTask> {
+    return request(
+      `/api/repository-intelligence/index-tasks/${encodeURIComponent(taskId)}/retry`,
+      { method: "POST" },
+    );
+  }
+
+  static cancelIndexTask(taskId: string): Promise<RepositoryIndexTask> {
+    return request(
+      `/api/repository-intelligence/index-tasks/${encodeURIComponent(taskId)}/cancel`,
+      { method: "POST" },
+    );
   }
 
   static clearIndex(repositoryPath: string): Promise<RepositoryIndexStatus> {

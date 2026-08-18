@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BrainCircuit,
   GitBranch,
+  KeyRound,
   Network,
   SearchCode,
   ZoomIn,
@@ -16,6 +17,7 @@ import RepositoryIntelligenceService, {
   type IntelligenceLevel,
   type RepositoryContext,
   type RepositoryIndexStatus,
+  type RepositoryIndexTask,
 } from "#/api/repository-intelligence-service";
 import { useActiveBackend } from "#/contexts/active-backend-context";
 import { useActiveConversation } from "#/hooks/query/use-active-conversation";
@@ -316,9 +318,13 @@ function RepositoryIntelligenceTab() {
   const [task, setTask] = useState("");
   const [context, setContext] = useState<RepositoryContext | null>(null);
   const [graph, setGraph] = useState<IntelligenceGraph | null>(null);
+  const [codeSearchApiKey, setCodeSearchApiKey] = useState("");
   const repositoryPath = conversation?.workspace?.working_dir?.trim() ?? "";
   const isLocal = backend.kind === "local";
   const statusKey = ["repository-intelligence", repositoryPath];
+  const taskKey = ["repository-intelligence", "index-task", repositoryPath];
+  const notifiedTaskId = useRef<string | null>(null);
+  const observedActiveTaskId = useRef<string | null>(null);
 
   const status = useQuery({
     queryKey: statusKey,
@@ -328,6 +334,31 @@ function RepositoryIntelligenceTab() {
     staleTime: 10_000,
     refetchInterval: (query) =>
       shouldPollIndexStatus(query.state.data) ? 2_000 : false,
+    meta: { disableToast: true },
+  });
+
+  const credentialsKey = ["repository-intelligence", "credentials"];
+  const credentials = useQuery({
+    queryKey: credentialsKey,
+    queryFn: () => RepositoryIntelligenceService.getCredentials(),
+    enabled: isLocal,
+    retry: false,
+    staleTime: 30_000,
+    meta: { disableToast: true },
+  });
+
+  const indexTask = useQuery({
+    queryKey: taskKey,
+    queryFn: () =>
+      RepositoryIntelligenceService.getLatestIndexTask(repositoryPath),
+    enabled: isLocal && Boolean(repositoryPath),
+    retry: false,
+    refetchInterval: (query) => {
+      const value = query.state.data;
+      return value && ["queued", "running", "cancelling"].includes(value.state)
+        ? 1_000
+        : false;
+    },
     meta: { disableToast: true },
   });
 
@@ -354,32 +385,55 @@ function RepositoryIntelligenceTab() {
   });
 
   const index = useMutation({
-    mutationFn: ({
-      refresh,
-      value,
-    }: {
-      refresh: boolean;
-      value: IntelligenceLevel;
-    }) =>
-      refresh
-        ? RepositoryIntelligenceService.refreshIndex(repositoryPath, value)
-        : RepositoryIntelligenceService.buildIndex(repositoryPath, value),
+    mutationFn: ({ value }: { refresh: boolean; value: IntelligenceLevel }) =>
+      RepositoryIntelligenceService.startIndexTask(repositoryPath, value),
     onSuccess: (next) => {
-      updateStatus(next);
-      const selected = next.providers.find(
-        (provider) => provider.capability === next.index_level,
-      );
-      if (selected?.repository_state === "error") {
-        displayErrorToast(
-          selected.detail ||
-            t(I18nKey.REPOSITORY_INTELLIGENCE$CAPABILITY_UNAVAILABLE),
-        );
-      } else {
-        displaySuccessToast(t(I18nKey.REPOSITORY_INTELLIGENCE$INDEX_COMPLETE));
-      }
+      observedActiveTaskId.current = next.id;
+      queryClient.setQueryData(taskKey, next);
+      notifiedTaskId.current = null;
     },
     onError: (error) => displayErrorToast(error.message),
   });
+
+  const retryIndex = useMutation({
+    mutationFn: (value: RepositoryIndexTask) =>
+      RepositoryIntelligenceService.retryIndexTask(value.id),
+    onSuccess: (next) => {
+      observedActiveTaskId.current = next.id;
+      queryClient.setQueryData(taskKey, next);
+      notifiedTaskId.current = null;
+    },
+    onError: (error) => displayErrorToast(error.message),
+  });
+
+  const cancelIndex = useMutation({
+    mutationFn: (value: RepositoryIndexTask) =>
+      RepositoryIntelligenceService.cancelIndexTask(value.id),
+    onSuccess: (next) => queryClient.setQueryData(taskKey, next),
+    onError: (error) => displayErrorToast(error.message),
+  });
+
+  useEffect(() => {
+    const completed = indexTask.data;
+    if (
+      completed &&
+      ["queued", "running", "cancelling"].includes(completed.state)
+    ) {
+      observedActiveTaskId.current = completed.id;
+      return;
+    }
+    if (
+      completed?.state !== "succeeded" ||
+      !completed.result ||
+      observedActiveTaskId.current !== completed.id ||
+      notifiedTaskId.current === completed.id
+    ) {
+      return;
+    }
+    queryClient.setQueryData(statusKey, completed.result);
+    notifiedTaskId.current = completed.id;
+    displaySuccessToast(t(I18nKey.REPOSITORY_INTELLIGENCE$INDEX_COMPLETE));
+  }, [indexTask.data, queryClient, statusKey, t]);
 
   const clear = useMutation({
     mutationFn: () => RepositoryIntelligenceService.clearIndex(repositoryPath),
@@ -387,6 +441,29 @@ function RepositoryIntelligenceTab() {
       updateStatus(next);
       setContext(null);
       setGraph(null);
+    },
+    onError: (error) => displayErrorToast(error.message),
+  });
+
+  const saveCredential = useMutation({
+    mutationFn: () =>
+      RepositoryIntelligenceService.setCodeSearchCredential(
+        codeSearchApiKey.trim(),
+      ),
+    onSuccess: async (next) => {
+      queryClient.setQueryData(credentialsKey, next);
+      setCodeSearchApiKey("");
+      await queryClient.invalidateQueries({ queryKey: statusKey });
+      displaySuccessToast(t(I18nKey.SETTINGS$SAVED));
+    },
+    onError: (error) => displayErrorToast(error.message),
+  });
+
+  const clearCredential = useMutation({
+    mutationFn: () => RepositoryIntelligenceService.clearCodeSearchCredential(),
+    onSuccess: async (next) => {
+      queryClient.setQueryData(credentialsKey, next);
+      await queryClient.invalidateQueries({ queryKey: statusKey });
     },
     onError: (error) => displayErrorToast(error.message),
   });
@@ -435,8 +512,18 @@ function RepositoryIntelligenceTab() {
   );
   const selectedReady = selectedProvider?.service_state === "ready";
   const selectedBuilt = selectedProvider?.repository_state === "indexed";
+  const requiresCredential = selectedProvider?.requires_credential === true;
+  const currentTask = indexTask.data;
+  const taskActive =
+    currentTask !== null &&
+    currentTask !== undefined &&
+    ["queued", "running", "cancelling"].includes(currentTask.state);
   const busy =
-    toggle.isPending || level.isPending || index.isPending || clear.isPending;
+    toggle.isPending ||
+    level.isPending ||
+    index.isPending ||
+    clear.isPending ||
+    taskActive;
   const selectedDefinition = LEVELS.find(
     (item) => item.value === selectedLevel,
   )!;
@@ -531,12 +618,68 @@ function RepositoryIntelligenceTab() {
             {t(I18nKey.REPOSITORY_INTELLIGENCE$CAPABILITY_UNAVAILABLE)}
           </p>
         )}
+        {requiresCredential && (
+          <div
+            data-testid="code-search-credential-form"
+            className="mt-4 rounded-lg border border-amber-400/30 bg-amber-500/5 p-3"
+          >
+            <div className="flex items-center gap-2 text-sm font-medium text-white">
+              <KeyRound className="size-4" />
+              {t(I18nKey.SETTINGS$SEARCH_API_KEY)}
+            </div>
+            {selectedProvider.detail && (
+              <p className="mt-1 text-xs text-amber-200">
+                {selectedProvider.detail}
+              </p>
+            )}
+            {!credentials.data?.secure_storage_available &&
+              credentials.data?.secure_storage_detail && (
+                <p className="mt-1 text-xs text-red-300">
+                  {credentials.data.secure_storage_detail}
+                </p>
+              )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <input
+                type="password"
+                value={codeSearchApiKey}
+                onChange={(event) => setCodeSearchApiKey(event.target.value)}
+                aria-label={t(I18nKey.SETTINGS$SEARCH_API_KEY)}
+                placeholder={t(I18nKey.SETTINGS$API_KEY_PLACEHOLDER)}
+                autoComplete="off"
+                className="min-w-0 flex-1 rounded-md border border-[var(--oh-border)] bg-black/20 px-3 py-2 text-sm text-white"
+              />
+              <button
+                type="button"
+                disabled={
+                  !codeSearchApiKey.trim() ||
+                  saveCredential.isPending ||
+                  !credentials.data?.secure_storage_available
+                }
+                onClick={() => saveCredential.mutate()}
+                className="rounded-md bg-white px-3 py-2 text-sm font-medium text-black disabled:opacity-40"
+              >
+                {t(I18nKey.SETTINGS$SAVE)}
+              </button>
+              {credentials.data?.code_search_source === "secure_store" && (
+                <button
+                  type="button"
+                  disabled={clearCredential.isPending}
+                  onClick={() => clearCredential.mutate()}
+                  className="rounded-md border border-red-500/30 px-3 py-2 text-sm text-red-300 disabled:opacity-40"
+                >
+                  {t(I18nKey.COMMON$REMOVE)}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         <div className="mt-4 flex flex-wrap gap-2">
           <button
             type="button"
             disabled={
               !enabled ||
               busy ||
+              requiresCredential ||
               (!selectedReady && selectedLevel !== "repository_map")
             }
             onClick={() =>
@@ -577,6 +720,63 @@ function RepositoryIntelligenceTab() {
             </button>
           )}
         </div>
+        {currentTask && (
+          <div
+            data-testid="index-task-progress"
+            className="mt-4 rounded-lg border border-[var(--oh-border)] bg-black/10 p-3"
+          >
+            <div className="flex items-center justify-between gap-3 text-xs text-[var(--oh-muted)]">
+              <span>
+                {currentTask.stage ?? currentTask.index_level} ·{" "}
+                {currentTask.state}
+              </span>
+              <span>{currentTask.progress}%</span>
+            </div>
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full bg-emerald-400 transition-[width]"
+                style={{ width: `${currentTask.progress}%` }}
+              />
+            </div>
+            {currentTask.error && (
+              <p role="alert" className="mt-2 text-xs text-red-300">
+                {currentTask.error}
+              </p>
+            )}
+            {currentTask.logs.length > 0 && (
+              <ul className="mt-3 max-h-28 space-y-1 overflow-y-auto font-mono text-[11px] text-[var(--oh-muted)]">
+                {currentTask.logs.slice(-5).map((log) => (
+                  <li key={`${log.timestamp}-${log.progress}-${log.message}`}>
+                    [{log.progress}%] {log.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="mt-3 flex gap-2">
+              {taskActive && (
+                <button
+                  type="button"
+                  disabled={cancelIndex.isPending}
+                  onClick={() => cancelIndex.mutate(currentTask)}
+                  className="rounded-md border border-red-500/30 px-3 py-1.5 text-xs text-red-300 disabled:opacity-40"
+                >
+                  {t(I18nKey.BUTTON$CANCEL)}
+                </button>
+              )}
+              {["failed", "cancelled"].includes(currentTask.state) &&
+                currentTask.attempt < currentTask.max_attempts && (
+                  <button
+                    type="button"
+                    disabled={retryIndex.isPending}
+                    onClick={() => retryIndex.mutate(currentTask)}
+                    className="rounded-md border border-[var(--oh-border)] px-3 py-1.5 text-xs text-white disabled:opacity-40"
+                  >
+                    {t(I18nKey.LAUNCH$TRY_AGAIN)}
+                  </button>
+                )}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="space-y-3">

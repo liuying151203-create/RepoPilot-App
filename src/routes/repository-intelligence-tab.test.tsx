@@ -6,23 +6,33 @@ import RepositoryIntelligenceTab, {
 } from "./repository-intelligence-tab";
 
 const {
-  buildIndexMock,
+  cancelIndexTaskMock,
   getContextMock,
+  getLatestIndexTaskMock,
   getStatusMock,
-  refreshIndexMock,
+  retryIndexTaskMock,
   setEnabledMock,
   setLevelMock,
+  startIndexTaskMock,
   getGraphMock,
   clearIndexMock,
+  clearCodeSearchCredentialMock,
+  getCredentialsMock,
+  setCodeSearchCredentialMock,
 } = vi.hoisted(() => ({
-  buildIndexMock: vi.fn(),
+  cancelIndexTaskMock: vi.fn(),
   getContextMock: vi.fn(),
+  getLatestIndexTaskMock: vi.fn(),
   getStatusMock: vi.fn(),
-  refreshIndexMock: vi.fn(),
+  retryIndexTaskMock: vi.fn(),
   setEnabledMock: vi.fn(),
   setLevelMock: vi.fn(),
+  startIndexTaskMock: vi.fn(),
   getGraphMock: vi.fn(),
   clearIndexMock: vi.fn(),
+  clearCodeSearchCredentialMock: vi.fn(),
+  getCredentialsMock: vi.fn(),
+  setCodeSearchCredentialMock: vi.fn(),
 }));
 
 vi.mock("#/contexts/active-backend-context", () => ({
@@ -37,14 +47,19 @@ vi.mock("#/hooks/query/use-active-conversation", () => ({
 
 vi.mock("#/api/repository-intelligence-service", () => ({
   default: {
-    buildIndex: buildIndexMock,
+    cancelIndexTask: cancelIndexTaskMock,
     getContext: getContextMock,
+    getLatestIndexTask: getLatestIndexTaskMock,
     getStatus: getStatusMock,
-    refreshIndex: refreshIndexMock,
+    retryIndexTask: retryIndexTaskMock,
     setEnabled: setEnabledMock,
     setLevel: setLevelMock,
+    startIndexTask: startIndexTaskMock,
     getGraph: getGraphMock,
     clearIndex: clearIndexMock,
+    clearCodeSearchCredential: clearCodeSearchCredentialMock,
+    getCredentials: getCredentialsMock,
+    setCodeSearchCredential: setCodeSearchCredentialMock,
   },
 }));
 
@@ -77,6 +92,23 @@ const indexedStatus = {
   symbol_count: 48,
   relationship_count: 20,
   graph_ready: true,
+};
+
+const completedIndexTask = {
+  id: "task-1",
+  repository_path: "D:/dev/example",
+  index_level: "repository_map" as const,
+  state: "succeeded" as const,
+  progress: 100,
+  stage: "repository_map" as const,
+  attempt: 1,
+  max_attempts: 3,
+  created_at: "2026-08-19T00:00:00Z",
+  started_at: "2026-08-19T00:00:01Z",
+  finished_at: "2026-08-19T00:00:02Z",
+  error: null,
+  logs: [],
+  result: indexedStatus,
 };
 
 const codeSearchStatus = {
@@ -126,9 +158,22 @@ const contextGraphStatus = {
 beforeEach(() => {
   vi.clearAllMocks();
   getStatusMock.mockResolvedValue(disabledStatus);
+  getLatestIndexTaskMock.mockResolvedValue(null);
+  getCredentialsMock.mockResolvedValue({
+    code_search_configured: false,
+    code_search_source: "none",
+    secure_storage_available: true,
+    secure_storage_detail: null,
+  });
+  setCodeSearchCredentialMock.mockResolvedValue({
+    code_search_configured: true,
+    code_search_source: "secure_store",
+    secure_storage_available: true,
+    secure_storage_detail: null,
+  });
   setEnabledMock.mockResolvedValue({ ...disabledStatus, enabled: true });
   setLevelMock.mockResolvedValue(codeSearchStatus);
-  buildIndexMock.mockResolvedValue(indexedStatus);
+  startIndexTaskMock.mockResolvedValue(completedIndexTask);
   getGraphMock.mockResolvedValue({
     nodes: [
       {
@@ -200,7 +245,7 @@ describe("RepositoryIntelligenceTab", () => {
 
     fireEvent.click(build);
     await waitFor(() =>
-      expect(buildIndexMock).toHaveBeenCalledWith(
+      expect(startIndexTaskMock).toHaveBeenCalledWith(
         "D:/dev/example",
         "repository_map",
       ),
@@ -226,6 +271,58 @@ describe("RepositoryIntelligenceTab", () => {
     );
   });
 
+  it("shows task progress and allows cancellation", async () => {
+    const activeTask = {
+      ...completedIndexTask,
+      state: "running" as const,
+      progress: 45,
+      finished_at: null,
+      result: null,
+      logs: [
+        {
+          timestamp: "2026-08-19T00:00:01Z",
+          level: "info" as const,
+          stage: "repository_map" as const,
+          progress: 45,
+          message: "Repository map built",
+        },
+      ],
+    };
+    getStatusMock.mockResolvedValue(indexedStatus);
+    getLatestIndexTaskMock.mockResolvedValue(activeTask);
+    cancelIndexTaskMock.mockResolvedValue({
+      ...activeTask,
+      state: "cancelling",
+    });
+    renderWithProviders(<RepositoryIntelligenceTab />);
+
+    expect(await screen.findByText("45%")).toBeInTheDocument();
+    expect(screen.getByText("[45%] Repository map built")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "BUTTON$CANCEL" }));
+
+    await waitFor(() =>
+      expect(cancelIndexTaskMock).toHaveBeenCalledWith(activeTask.id),
+    );
+  });
+
+  it("does not replace current status with a historical completed task", async () => {
+    getStatusMock.mockResolvedValue(codeSearchStatus);
+    getLatestIndexTaskMock.mockResolvedValue(completedIndexTask);
+
+    renderWithProviders(<RepositoryIntelligenceTab />);
+
+    expect(
+      await screen.findByRole("button", {
+        name: "REPOSITORY_INTELLIGENCE$BUILD_SEARCH_INDEX",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", {
+        name: "REPOSITORY_INTELLIGENCE$BUILD_REPOSITORY_MAP",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it("switches capability levels without exposing internal engine names", async () => {
     getStatusMock.mockResolvedValue(indexedStatus);
     renderWithProviders(<RepositoryIntelligenceTab />);
@@ -247,6 +344,33 @@ describe("RepositoryIntelligenceTab", () => {
         name: "REPOSITORY_INTELLIGENCE$BUILD_SEARCH_INDEX",
       }),
     ).toBeEnabled();
+    expect(
+      screen.queryByText("internal-search-engine"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("configures an authentication-required search capability securely", async () => {
+    getStatusMock.mockResolvedValue({
+      ...codeSearchStatus,
+      providers: [
+        {
+          ...codeSearchStatus.providers[0],
+          available: false,
+          repository_state: "error",
+          requires_credential: true,
+          detail: "code search authentication required",
+        },
+      ],
+    });
+    renderWithProviders(<RepositoryIntelligenceTab />);
+
+    const input = await screen.findByLabelText("SETTINGS$SEARCH_API_KEY");
+    fireEvent.change(input, { target: { value: "new-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "SETTINGS$SAVE" }));
+
+    await waitFor(() =>
+      expect(setCodeSearchCredentialMock).toHaveBeenCalledWith("new-secret"),
+    );
     expect(
       screen.queryByText("internal-search-engine"),
     ).not.toBeInTheDocument();

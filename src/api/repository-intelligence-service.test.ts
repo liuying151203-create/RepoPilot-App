@@ -77,6 +77,41 @@ describe("RepositoryIntelligenceService", () => {
     );
   });
 
+  it("manages the code search credential without reading its value", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            code_search_configured: true,
+            code_search_source: "secure_store",
+            secure_storage_available: true,
+            secure_storage_detail: null,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+
+    const saved =
+      await RepositoryIntelligenceService.setCodeSearchCredential("secret");
+    await RepositoryIntelligenceService.clearCodeSearchCredential();
+
+    expect(saved).not.toHaveProperty("api_key");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8000/api/repository-intelligence/credentials/code-search",
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({ api_key: "secret" }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8000/api/repository-intelligence/credentials/code-search",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
   it("persists the selected intelligence level and builds that level", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
       Promise.resolve(
@@ -116,6 +151,52 @@ describe("RepositoryIntelligenceService", () => {
           index_level: "code_search",
         }),
       }),
+    );
+  });
+
+  it("starts and controls a persistent index task", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ id: "task/1", state: "queued" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await RepositoryIntelligenceService.startIndexTask(
+      "workspace/project",
+      "context_graph",
+    );
+    await RepositoryIntelligenceService.getLatestIndexTask("workspace/project");
+    await RepositoryIntelligenceService.retryIndexTask("task/1");
+    await RepositoryIntelligenceService.cancelIndexTask("task/1");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:8000/api/repository-intelligence/index-tasks",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          repository_path: "workspace/project",
+          index_level: "context_graph",
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:8000/api/repository-intelligence/index-tasks/latest?repository_path=workspace%2Fproject",
+      expect.anything(),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://127.0.0.1:8000/api/repository-intelligence/index-tasks/task%2F1/retry",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "http://127.0.0.1:8000/api/repository-intelligence/index-tasks/task%2F1/cancel",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 
