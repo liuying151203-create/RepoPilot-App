@@ -25,7 +25,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -184,7 +184,7 @@ if (affectedDirs.size === 0 && affectedFiles.size === 0) {
 // Convert dir names to full paths relative to repo root. File paths are
 // already repo-relative and are only used for defensive root-level spec support.
 const testPaths = [
-  ...[...affectedDirs].sort().map((d) => join(testDir, d)),
+  ...[...affectedDirs].sort().map((d) => posix.join(testDir, d)),
   ...[...affectedFiles].sort(),
 ];
 

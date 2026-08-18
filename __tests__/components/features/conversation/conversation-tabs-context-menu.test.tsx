@@ -62,7 +62,12 @@ describe("ConversationTabsContextMenu", () => {
   it("should render all default tabs when open", () => {
     render(<ConversationTabsContextMenu isOpen={true} onClose={vi.fn()} />);
 
-    const expectedTabs = ["COMMON$FILES", "COMMON$TERMINAL", "COMMON$BROWSER"];
+    const expectedTabs = [
+      "COMMON$FILES",
+      "REPOSITORY_INTELLIGENCE$TITLE",
+      "COMMON$TERMINAL",
+      "COMMON$BROWSER",
+    ];
     for (const tab of expectedTabs) {
       expect(screen.getByText(tab)).toBeInTheDocument();
     }
@@ -94,7 +99,9 @@ describe("ConversationTabsContextMenu", () => {
 
     render(<ConversationTabsContextMenu isOpen={true} onClose={vi.fn()} />);
 
-    await user.click(screen.getByTestId("conversation-tabs-menu-open-terminal"));
+    await user.click(
+      screen.getByTestId("conversation-tabs-menu-open-terminal"),
+    );
 
     expect(useConversationStore.getState().selectedTab).toBe("terminal");
     const storedState = JSON.parse(
@@ -132,13 +139,13 @@ describe("ConversationTabsContextMenu", () => {
 
     const storeState = useConversationStore.getState();
     expect(storeState.hasRightPanelToggled).toBe(true);
-    expect(storeState.selectedTab).toBe("terminal");
+    expect(storeState.selectedTab).toBe("intelligence");
 
     const storedState = JSON.parse(
       localStorage.getItem(`conversation-state-${CONVERSATION_ID}`)!,
     );
     expect(storedState.unpinnedTabs).toContain("files");
-    expect(storedState.selectedTab).toBe("terminal");
+    expect(storedState.selectedTab).toBe("intelligence");
   });
 
   it("should not close the right panel when unpinning a non-active tab", async () => {

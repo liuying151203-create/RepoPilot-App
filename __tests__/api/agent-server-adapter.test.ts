@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import path from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CANVAS_UI_CLIENT_TOOL_NAME } from "#/constants/canvas-ui";
 
 import {
@@ -180,12 +181,12 @@ describe("buildStartConversationRequest", () => {
     for (const skill of skills) {
       expect(skill).toHaveProperty("name");
       expect(skill).toHaveProperty("content");
-      // source must be an absolute path to the skill's SKILL.md so the
+      // source must be an absolute host path to the skill's SKILL.md so the
       // Python agent-server can resolve bundled resources (scripts/, references/).
       const source = skill.source as string;
-      expect(source).toMatch(/^\//);
+      expect(path.isAbsolute(source)).toBe(true);
       expect(source).toMatch(
-        new RegExp(`/${skill.name as string}/SKILL\\.md$`),
+        new RegExp(`[\\\\/]${skill.name as string}[\\\\/]SKILL\\.md$`),
       );
       expect(skill).toHaveProperty("is_agentskills_format", true);
       // trigger is either null (always-active) or { type, keywords }
